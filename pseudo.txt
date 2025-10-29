@@ -1,0 +1,104 @@
+delay = [50 , 200, 350, 500, 650]
+exp = ["spatial cue", "Color cue", "No cue"]
+n_trials = 28
+everything = counterbalanced(exp, delay)
+
+
+for i in 1 to n_trials
+    for (type_of_exp,delay) in everything
+        print a white dot inside a grey square
+        wait 300 ms
+        eccentricity = 3°  
+        positions = [
+    (-eccentricity, +eccentricity), (top left)
+    (+eccentricity, +eccentricity), (top right)
+    (-eccentricity, -eccentricity), (bottom left)
+    (+eccentricity, -eccentricity)  (bottom right) 
+]
+        bars = create_bars(positions)
+        plot bars
+        plot it
+        wait 500 ms
+
+        target_bar = random_choice(bars)
+        target_position = target_bar.position
+        target_color = target_bar.color
+        target_orientation = target_bar.orientation
+
+        clear screen (show background only)
+        wait 500 ms
+        if type_of_exp is "spatial cue"
+            plot 2 arrows pointing to the direction of target_position
+        if type_of_exp is "Color cue"
+            plot square at screen_center with:
+                color = target_color
+                size =  1.2° × 1.2°
+        if type_of_exp is "No cue"
+            clear screen (show background only)
+
+        wait 100 ms
+        clear screen (show background only)
+        current_delay = choose a random counterbalanced delay from the delay list
+        wait current_delay ms
+        plot white_rectangle at screen_center with:
+            size = 1.1° × 0.4°
+            orientation = 0° 
+            adjustable = TRUE
+        
+        plot white_outline_square at target_position with:
+            size = 1.2° × 1.2°
+            style = outline
+         
+        wait for the participant to respond with the touch of a key
+        plot "use the mouse movement to tilt the white rectangle or keys 
+	buttons when you think it's aligned with the target bar. 
+	Press spacebar to validate your response."
+
+        response_complete = True
+        response_orientation = 0°
+        
+        while response_complete:
+            
+            if mouse_moved:
+                response_orientation = calculate_angle_from_mouse()
+                update white_rectangle.orientation = response_orientation
+
+            if keyboard_key_pressed:
+                response_orientation += key_rotation_increment
+                update white_rectangle.orientation = response_orientation
+
+            if spacebar_pressed:
+                response_complete = False
+
+
+    
+        orientation_error = abs(target_orientation - response_orientation)
+
+        store the difference along with the type_of_exp and the delay used
+        clear screen
+        plot click the left mouse button to proceed to the next trial in dark 
+	and above offset : subject's orientation error 
+
+
+create_bars()
+    orientation = [0,0,0,0]
+    position[i] = corner[i] OF invisible_square
+
+    n_bars = 4
+    bars = []
+    for i in 1 to n_bars
+        orientation[i] = random(0, 180°)
+        while any(|orientation[i] - orientation[j]| < 30° FOR j < i):
+            orientation[i] = random(0, 180°)
+
+        color[i] = random(0, 360°)
+        while any(|color[i] - color[j]| < 60° FOR j < i):
+            color[i] = random(0, 360°)
+
+        bars[i] = create_rectangle_with:
+            size = 1.1° × 0.4° #(length × height)
+            position = position[i]
+            orientation = orientation[i]
+            color = color[i]
+    return bars
+8
