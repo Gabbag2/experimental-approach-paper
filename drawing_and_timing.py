@@ -1,18 +1,22 @@
 """
 This module defines:
 - timing helpers (frame timing, draw & wait)
-- visual helpers (deg->px, color mapping)
+- color helpers (HSV wheel)
 - stimulus constructors (fixation, memory bars, cues, probe bar, feedback)
 
 All stimuli returned here are Expyriment stimuli already positioned in
 screen-centered coordinates (0,0 = fixation).
+
+IMPORTANT: this version is PIXEL-BASED.
+There is no visual-angle / deg->px conversion anymore.
+All sizes and positions are assumed to already be in pixels.
 """
 
 import math
 from collections.abc import Iterable
 
 from expyriment import stimuli
-from expyriment.misc import constants
+from expyriment.misc import constants, geometry
 
 
 ########################################
@@ -33,7 +37,7 @@ def ms_to_frames(ms):
 
 def frames_to_ms(n_frames):
     """
-    Convert a frame count back to ms
+    Convert a frame count back to ms.
     """
     return n_frames * MS_PER_FRAME
 
@@ -80,66 +84,22 @@ def present_for_ms(exp, stims, duration_ms):
     """
     Present `stims` for approximately `duration_ms` milliseconds:
     - draw everything and flip once
-    - then wait the remaining time (duration - draw_time), quantized to frame rate
+    - then wait the remaining time (duration - draw_time)
 
-    If duration_ms == 0, just returns immediately
+    If duration_ms <= 0, return immediately.
     """
     if duration_ms <= 0:
         return
 
-    draw_time = _timed_draw(exp, stims)  # how long it took to draw+flip in ms
+    draw_time = _timed_draw(exp, stims)  # ms to draw+flip
     remaining = duration_ms - draw_time
     if remaining > 0:
         exp.clock.wait(remaining)
 
 
 ########################################
-# ========== 2. VISUAL HELPERS =========
+# ========== 2. COLOR HELPERS ==========
 ########################################
-
-def calibrate_visual_geometry(exp, screen_width_mm, viewing_distance_mm=600):
-    """
-    Calibrate degrees→pixels conversion for THIS experiment setup.
-
-    Arguments:
-    - exp: your Expyriment Experiment (already initialized)
-    - screen_width_mm: visible display width in millimeters (measure with a ruler)
-    - viewing_distance_mm: eye-to-screen distance in millimeters
-                           default = 600 mm (60 cm), as in the paper
-
-    What this does:
-    - Reads the current screen resolution from exp.screen.size
-    - Computes pixels-per-degree of visual angle for this setup
-    - Stores two convenience things on `exp`:
-        exp.PX_PER_DEG  (float)
-        exp.deg2px(deg) (callable)
-    """
-
-    # 1. Get pixel resolution from Expyriment
-    screen_width_px = exp.screen.size[0]  # horizontal resolution in px
-
-    # 2. Compute mm per pixel
-    mm_per_px = float(screen_width_mm) / float(screen_width_px)
-
-    # 3. Compute physical length on screen that subtends 1 degree
-    #    visual_angle = 2 * atan( size_mm / (2 * distance_mm) )
-    #    -> invert for size_mm given visual_angle = 1°
-    theta_rad = math.radians(1.0)  # 1 degree in radians
-    size_mm_for_one_deg = 2.0 * viewing_distance_mm * math.tan(theta_rad / 2.0)
-
-    # 4. Convert that physical size to pixels
-    px_per_deg = size_mm_for_one_deg / mm_per_px
-
-    # 5. Attach results to the experiment so everything else can use it
-    exp.PX_PER_DEG = px_per_deg
-
-    def _deg2px(deg):
-        return deg * exp.PX_PER_DEG
-
-    exp.deg2px = _deg2px
-
-    return px_per_deg 
-
 
 def hsv_to_rgb(h, s, v):
     """
@@ -182,8 +142,8 @@ def color_from_wheel(color_deg):
     """
     Map color index (1..360) to an RGB value.
 
-    In the paper, each bar's color is sampled from a 360-step color wheel.
-    We'll interpret that as evenly spaced hues at max saturation and brightness.
+    Each bar's color is sampled from a 360-step color wheel.
+    We treat that as hue=color_deg, full saturation, full value.
 
     Returns an (r,g,b) tuple usable as Expyriment colour.
     """
@@ -191,27 +151,28 @@ def color_from_wheel(color_deg):
 
 
 ########################################
-# ========== 3. STIMULUS CREATION =====
+# ========== 3. STIMULUS CREATION ======
 ########################################
 
 def make_oriented_colored_bar(
-    exp,
     position_px,
-    size_deg,
+    size_px,
     orientation_deg,
     color_id
 ):
     """
     One memory item (colored, oriented bar).
-    """
-    length_deg, height_deg = size_deg
-    length_px = int(round(exp.deg2px(length_deg)))
-    height_px = int(round(exp.deg2px(height_deg)))
 
+    position_px: (x,y) in pixels, relative to screen center
+    size_px: (length_px, height_px)
+    orientation_deg: orientation of the bar (0-360)
+    color_id: hue on the wheel (1-360)
+    """
+    length_px, height_px = size_px
     rgb = color_from_wheel(color_id)
 
     bar = stimuli.Rectangle(
-        size=(length_px, height_px),
+        size=(int(round(length_px)), int(round(height_px))),
         colour=rgb,
         position=position_px
     )
@@ -223,18 +184,20 @@ def make_oriented_colored_bar(
 
 
 def make_outline_square(
-    exp,
     position_px,
-    size_deg,
+    size_px,
     color=constants.C_BLACK,
     line_width_px=2
 ):
     """
     Outline square marking the probed item's original location.
+
+    position_px: (x,y) where the square should be drawn
+    size_px: (w_px, h_px) of the box we want outlined
     """
-    w_deg, h_deg = size_deg
-    w_px = int(round(exp.deg2px(w_deg)))
-    h_px = int(round(exp.deg2px(h_deg)))
+    w_px, h_px = size_px
+    w_px = int(round(w_px))
+    h_px = int(round(h_px))
 
     canv_w = w_px + line_width_px
     canv_h = h_px + line_width_px
@@ -282,90 +245,123 @@ def make_outline_square(
 
     return canv
 
-def make_spatial_cue_arrows(exp, target_position_px, color=constants.C_BLACK):
-    """
-    Two arrowheads near fixation, both pointing toward the target location.
-    Each arrowhead is a triangle. We build them in final (screen-centered)
-    coordinates so we don't have to mess with .rotate().
-    """
 
+def make_spatial_cue_arrows(target_position_px, color=constants.C_BLACK):
+    """
+    Make TWO arrows at fixation, both pointing toward the cued item's position.
+    We infer which diagonal to point to from the sign of (x,y).
+
+    Returns list of 4 stimuli: [arrow1_rect, arrow1_tri, arrow2_rect, arrow2_tri]
+    All of them are positioned near fixation.
+    """
     tx, ty = target_position_px
 
-    # Direction from fixation to target
-    angle_rad = math.atan2(ty, tx)
+    if tx >= 0 and ty >= 0:
+        direction = "top_right"
+    elif tx <= 0 and ty >= 0:
+        direction = "top_left"
+    elif tx <= 0 and ty <= 0:
+        direction = "bottom_left"
+    else:
+        direction = "bottom_right"
 
-    # Unit direction vector (toward target)
-    ux = math.cos(angle_rad)
-    uy = math.sin(angle_rad)
+    def build_single_arrow(direction='top_left', length=100, width=10,
+                           color=color, y_offset_px=0):
+        """
+        Build one arrow (shaft + head) for a given direction,
+        vertically offset so we can draw two stacked arrows.
+        """
 
-    # Perpendicular direction (90° CCW)
-    px = -uy
-    py = ux
+        # shaft
+        rect = stimuli.Rectangle(
+            size=(length, width),
+            colour=color,
+            position=(0, y_offset_px)
+        )
 
-    # Geometry for one arrowhead (triangle), defined along +x before rotation.
-    ARROW_LEN = 40.0          # length of the arrowhead
-    ARROW_HALF_WIDTH = 12.0   # half the base width
+        # triangle head
+        tri = stimuli.Shape(
+            vertex_list=geometry.vertices_regular_polygon(3, 25),
+            colour=color,
+            position=(0, y_offset_px)
+        )
 
-    half_L = ARROW_LEN / 2.0
-    tri_local = [
-        ( +half_L, 0.0),                          # tip
-        ( -half_L, +ARROW_HALF_WIDTH),            # base upper
-        ( -half_L, -ARROW_HALF_WIDTH),            # base lower
-    ]
+        # Attach point tuning (keeps arrow head touching shaft tip)
+        ATTACH = 20  # px
 
-    def rotate_and_translate(vertices, center_x, center_y, ang_rad):
-        cos_a = math.cos(ang_rad)
-        sin_a = math.sin(ang_rad)
-        out = []
-        for (x, y) in vertices:
-            rx = x * cos_a - y * sin_a
-            ry = x * sin_a + y * cos_a
-            out.append((rx + center_x, ry + center_y))
-        return out
+        if direction == 'top_right':
+            rect.rotate(45)
+            tri_x =  length / 2
+            tri_y =  y_offset_px + length / 2
+            tri_x -= ATTACH / math.sqrt(2)
+            tri_y -= ATTACH / math.sqrt(2)
+            tri.position = (tri_x, tri_y)
+            tri.rotate(315)  # -45°
 
-    # Where to place them:
-    ARROW_CENTER_DIST = 25.0   # distance from fixation in pointing direction
-    ARROW_SEP = 10.0           # spread along perpendicular (so we get two arrows)
+        elif direction == 'top_left':
+            rect.rotate(135)
+            tri_x = -length / 2
+            tri_y =  y_offset_px + length / 2
+            tri_x += ATTACH / math.sqrt(2)
+            tri_y -= ATTACH / math.sqrt(2)
+            tri.position = (tri_x, tri_y)
+            tri.rotate(45)
 
-    ax = ux * ARROW_CENTER_DIST + px * ARROW_SEP
-    ay = uy * ARROW_CENTER_DIST + py * ARROW_SEP
+        elif direction == 'bottom_left':
+            rect.rotate(225)
+            tri_x = -length / 2
+            tri_y =  y_offset_px - length / 2
+            tri_x += ATTACH / math.sqrt(2)
+            tri_y += ATTACH / math.sqrt(2)
+            tri.position = (tri_x, tri_y)
+            tri.rotate(135)
 
-    bx = ux * ARROW_CENTER_DIST - px * ARROW_SEP
-    by = uy * ARROW_CENTER_DIST - py * ARROW_SEP
+        elif direction == 'bottom_right':
+            rect.rotate(315)
+            tri_x =  length / 2
+            tri_y =  y_offset_px - length / 2
+            tri_x -= ATTACH / math.sqrt(2)
+            tri_y += ATTACH / math.sqrt(2)
+            tri.position = (tri_x, tri_y)
+            tri.rotate(225)
 
-    verts_a = rotate_and_translate(tri_local, ax, ay, angle_rad)
-    verts_b = rotate_and_translate(tri_local, bx, by, angle_rad)
+        return rect, tri
 
-    # Build Shape objects (outline polygons)
-    arrow_a = stimuli.Shape(
-        vertex_list=verts_a,
-        colour=color,
-        position=(0, 0)
+    GAP = 50  # vertical offset between the two arrows (px)
+
+    arrow1_rect, arrow1_tri = build_single_arrow(
+        direction=direction,
+        length=100,
+        width=10,
+        color=color,
+        y_offset_px=-GAP/2.0
     )
-    arrow_b = stimuli.Shape(
-        vertex_list=verts_b,
-        colour=color,
-        position=(0, 0)
+
+    arrow2_rect, arrow2_tri = build_single_arrow(
+        direction=direction,
+        length=100,
+        width=10,
+        color=color,
+        y_offset_px=+GAP/2.0
     )
 
-    # Make them visually thick enough to be obvious
-    arrow_a.line_width = 4
-    arrow_b.line_width = 4
-
-    return [arrow_a, arrow_b]
+    return [arrow1_rect, arrow1_tri, arrow2_rect, arrow2_tri]
 
 
 def make_color_cue_square(
-    exp,
-    size_deg,
+    size_px,
     fill_color_id
 ):
     """
     Central filled square (feature retro-cue).
+    Drawn at fixation (0,0).
+
+    size_px: (w_px, h_px)
+    fill_color_id: hue on wheel (1-360)
     """
-    w_deg, h_deg = size_deg
-    w_px = int(round(exp.deg2px(w_deg)))
-    h_px = int(round(exp.deg2px(h_deg)))
+    w_px, h_px = size_px
+    w_px = int(round(w_px))
+    h_px = int(round(h_px))
 
     rgb = color_from_wheel(fill_color_id)
 
@@ -378,26 +374,28 @@ def make_color_cue_square(
 
 
 def make_probe_bar(
-    exp,
     position_px,
-    size_deg,
+    size_px,
     orientation_deg,
     color=constants.C_BLACK
 ):
     """
-    Rotatable response bar at fixation.
+    Rotatable response bar shown at fixation during report.
+
+    position_px: (x,y)
+    size_px: (length_px, height_px)
+    orientation_deg: bar angle (0-360)
     """
-    length_deg, height_deg = size_deg
-    length_px = int(round(exp.deg2px(length_deg)))
-    height_px = int(round(exp.deg2px(height_deg)))
+    length_px, height_px = size_px
 
     bar = stimuli.Rectangle(
-        size=(length_px, height_px),
+        size=(int(round(length_px)), int(round(height_px))),
         colour=color,
         position=position_px
     )
     bar.rotate(orientation_deg)
     return bar
+
 
 def make_feedback_text(
     text,
@@ -405,8 +403,8 @@ def make_feedback_text(
     font_size=24
 ):
     """
-    Feedback after response
-    We just render text at fixation like "Error: 12.3°".
+    Feedback after response, e.g. "Error: 12.3°".
+    Displayed at fixation.
     """
     return stimuli.TextLine(
         text=text,
