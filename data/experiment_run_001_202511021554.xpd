@@ -1,0 +1,15 @@
+#Expyriment 1.0.0 (Python 3.10.16), .xpd-file, coding: cp1252
+#date: Sun Nov 02 2025 15:54:43
+#--EXPERIMENT INFO
+#e mainfile: experiment_run.py
+#e sha1: 096ddd
+#e modules: drawing_and_timing.py (5509fa)
+#e Experiment: retro_cue_task_fixed_layout
+#e no between subject factors
+#--SUBJECT INFO
+#s id: 1
+subject_id,cue_type,cue_probe_delay_ms,true_orientation_deg,reported_orientation_deg,offset_abs_error_deg
+1,color,500,18.0,90.0,72.0
+1,color,50,100.0,90.0,10.0
+1,color,650,114.0,90.0,24.0
+1,color,650,25.0,90.0,65.0
