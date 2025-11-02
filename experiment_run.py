@@ -97,22 +97,34 @@ COL_MIN_SEP_DEG          = 60         # hues differ by at least 60° on the whee
 
 def build_trial_list():
     """
-    Full design:
-    3 cue types x 5 delays x REPEATS_PER_CONDITION reps each.
+    We want:
+    For each (cue_type, delay) pair : total REPEATS_PER_CONDITION trials (e.g. 28)
+    Within those 28, each of the 4 locations appears equally often.
+    So each location is repeated REPEATS_PER_CONDITION // 4 times.
 
-    Example with default params:
-    3 * 5 * 28 = 420 trials total
+    With defaults:
+    3 cue types x 5 delays x 28 = 420 trials total.
     """
     trials = []
-    for cue_type in CUE_TYPES:
-        for dly in CUE_PROBE_DELAYS_MS:
-            for _ in range(REPEATS_PER_CONDITION):
-                trials.append({
-                    "cue_type": cue_type,
-                    "delay": dly
-                })
+    reps_per_loc = REPEATS_PER_CONDITION // 4
+
+    for cue_type in CUE_TYPES:                  # 3
+        for dly in CUE_PROBE_DELAYS_MS:         # 5
+            # build the 28 trials for this (cue_type, dly)
+            block_trials = []
+            for loc_idx in range(N_ITEMS_PER_ARRAY):  # 0..3
+                for _ in range(reps_per_loc):         # 7
+                    block_trials.append({
+                        "cue_type": cue_type,
+                        "delay": dly,
+                        "target_loc_idx": loc_idx,
+                    })
+            random.shuffle(block_trials)
+            trials.extend(block_trials)
+
     random.shuffle(trials)
     return trials
+
 
 # ============================================================
 # --- HELPER FUNCTIONS FOR STIM CREATION ---
@@ -196,7 +208,7 @@ def create_memory_array():
 # This is the core of the task. We run this many times within each block.
 # ============================================================
 
-def run_single_trial(exp, cue_type, cue_probe_delay_ms):
+def run_single_trial(exp, cue_type, cue_probe_delay_ms, target_loc_idx):
     """
     Run ONE full trial with a given cue type and a given cue/probe delay.
 
@@ -251,15 +263,13 @@ def run_single_trial(exp, cue_type, cue_probe_delay_ms):
 
     # --------------------------------------------------------
     # 4. Retro-cue
-    #
-    # We randomly pick which stimulus will be probed later.
     # The cue tells the subject which item from the array matters.
     #
     # spatial cue  = arrows from fixation pointing toward the item's location
     # color cue    = solid square at fixation with that item's color
     # no cue       = nothing (just a blank of the same duration)
     # --------------------------------------------------------
-    target_bar = random.choice(bars)
+    target_bar = bars[target_loc_idx]
     target_pos_px    = target_bar["pos"]
     target_color_deg = target_bar["color_deg"]
     target_true_ori  = target_bar["ori_deg"]
@@ -373,6 +383,7 @@ def run_single_trial(exp, cue_type, cue_probe_delay_ms):
     return {
         "cue_type": cue_type,
         "delay": cue_probe_delay_ms,
+        "target_loc_idx": int(target_loc_idx),
         "true_orientation": float(target_true_ori),
         "reported_orientation": float(reported_orientation),
         "offset": float(offset),
@@ -402,6 +413,7 @@ def main():
     exp.data_variable_names = [
         "cue_type",
         "cue_probe_delay_ms",
+        "target_loc_idx",
         "true_orientation_deg",
         "reported_orientation_deg",
         "offset_abs_error_deg"
@@ -418,10 +430,16 @@ def main():
     control.start(subject_id=1)
 
     for t in all_trials:
-        result = run_single_trial(exp, t["cue_type"], t["delay"])
+        result = run_single_trial(
+            exp,
+            cue_type=t["cue_type"],
+            cue_probe_delay_ms=t["delay"],
+            target_loc_idx=t["target_loc_idx"]
+        )
         exp.data.add([
             result["cue_type"],
             result["delay"],
+            result["target_loc_idx"],
             result["true_orientation"],
             result["reported_orientation"],
             result["offset"]
