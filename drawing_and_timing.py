@@ -1,258 +1,202 @@
 """
-This module defines:
-- timing helpers (frame timing, draw & wait)
-- color helpers (HSV wheel)
-- stimulus constructors (fixation, memory bars, cues, probe bar, feedback)
+drawing_and_timing.py
 
-All stimuli returned here are Expyriment stimuli already positioned in
-screen-centered coordinates (0,0 = fixation).
+All the low-level visual stuff for the task:
+- drawing bars / cues / probe / feedback
+- handling timing of what gets shown on screen
 
-IMPORTANT: this version is PIXEL-BASED.
-There is no visual-angle / deg->px conversion anymore.
-All sizes and positions are assumed to already be in pixels.
+The goal is:
+experiment_run.py controls what happens when
+this file controls what gets drawn and for how long
 """
 
 import math
-from collections.abc import Iterable
-
+import time
 from expyriment import stimuli
 from expyriment.misc import constants, geometry
 
 
-########################################
-# ========== 1. TIMING HELPERS =========
-########################################
+# ============================================================
+# --- BASIC SCREEN CONTROL HELPERS ---
+# ============================================================
 
-# We assume a 60Hz display
-FPS = 60
-MS_PER_FRAME = 1000.0 / FPS  # ~16.67 ms at 60Hz
-
-
-def ms_to_frames(ms):
+def _blit_to_backbuffer(exp, stim_list):
     """
-    Convert milliseconds to an integer number of video frames.
+    Draw a list of stimuli to the backbuffer (not yet visible).
+
+    We don't flip here. This lets us prepare the frame first.
     """
-    return int(math.ceil(ms / MS_PER_FRAME))
+    for stim in stim_list:
+        stim.present(clear=False, update=False)  # draw but don't flip yet
+    # NOTE: We do NOT clear here. Callers are responsible for clearing screen
+    # before first blit if needed.
 
 
-def frames_to_ms(n_frames):
+def _timed_flip_and_measure(exp):
     """
-    Convert a frame count back to ms.
+    Flip the backbuffer to the screen and return the timestamp (in ms).
     """
-    return n_frames * MS_PER_FRAME
+    flip_timestamp_ms = exp.clock.time  # time *before* flip call
+    exp.screen.update()                 # flip
+    return flip_timestamp_ms
 
 
-def _blit_to_backbuffer(exp, stims):
+def draw_now(exp, stim_list):
     """
-    Internal helper.
-    Clear the backbuffer, draw all stims into it (without flipping),
-    but do NOT update the screen yet.
+    Just draw these stimuli and show them immediately.
+
+    Used for interactive phases (e.g. the response phase where subject
+    rotates the probe bar). We don't need a fixed duration there, we just
+    want to refresh ASAP.
     """
     exp.screen.clear()
-
-    if isinstance(stims, Iterable) and not isinstance(stims, (str, bytes)):
-        for stim in stims:
-            stim.present(clear=False, update=False)
-    else:
-        stims.present(clear=False, update=False)
+    _blit_to_backbuffer(exp, stim_list)
+    _timed_flip_and_measure(exp)
 
 
-def draw_now(exp, stims):
+def _timed_draw(exp, stim_list):
     """
-    Draw stimuli to backbuffer and flip once immediately.
-    (One frame; no enforced duration.)
+    Draw stimuli, flip, and return the actual flip time in ms.
+
+    This is the "one frame shown" part. We don't control how long it stays;
+    present_for_ms() does that by waiting after this call.
     """
-    _blit_to_backbuffer(exp, stims)
-    exp.screen.update()
+    exp.screen.clear()
+    _blit_to_backbuffer(exp, stim_list)
+    flip_t_ms = _timed_flip_and_measure(exp)
+    return flip_t_ms
 
 
-def _timed_draw(exp, stims):
+def present_for_ms(exp, stim_list, duration_ms):
     """
-    Draw stimuli and flip once, return how long (ms) that draw+flip took.
+    Show a list of stimuli for a specific amount of time (in ms).
 
-    We measure because we want to compensate for drawing time when enforcing
-    a total presentation duration.
+    This is our standard "put something on screen for X ms" call.
+    - fixation
+    - memory array
+    - cue
+    - blank delays
+    - feedback
+
+    How it works:
+    1. draw + flip (get the flip timestamp)
+    2. busy-wait / sleep until total time on screen reaches duration_ms
     """
-    t0 = exp.clock.time
-    _blit_to_backbuffer(exp, stims)
-    exp.screen.update()
-    elapsed = exp.clock.time - t0  # ms elapsed
-    return elapsed
+    flip_t = _timed_draw(exp, stim_list)
+    target_t = flip_t + duration_ms
+
+    # Simple wait loop. We try to sleep in small chunks so timing isn't horrible.
+    while True:
+        now = exp.clock.time
+        remaining = target_t - now
+        if remaining <= 0:
+            break
+        # sleep a little to avoid burning CPU
+        time.sleep(min(remaining / 1000.0, 0.001))
 
 
-def present_for_ms(exp, stims, duration_ms):
-    """
-    Present `stims` for approximately `duration_ms` milliseconds:
-    - draw everything and flip once
-    - then wait the remaining time (duration - draw_time)
-
-    If duration_ms <= 0, return immediately.
-    """
-    if duration_ms <= 0:
-        return
-
-    draw_time = _timed_draw(exp, stims)  # ms to draw+flip
-    remaining = duration_ms - draw_time
-    if remaining > 0:
-        exp.clock.wait(remaining)
-
-
-########################################
-# ========== 2. COLOR HELPERS ==========
-########################################
+# ============================================================
+# --- COLOR HELPERS ---
+# ============================================================
 
 def hsv_to_rgb(h, s, v):
     """
-    Convert HSV to RGB.
-    h in [0, 360)
-    s in [0, 1]
-    v in [0, 1]
+    Convert HSV in [0,1] to RGB in [0,255].
 
-    Returns (r, g, b) with each in [0,255]
+    We use this to assign each memory item a color on a color wheel.
     """
-    h = float(h) % 360.0
-    s = float(s)
-    v = float(v)
+    i = int(h * 6.0)
+    f = (h * 6.0) - i
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    i = i % 6
 
-    c = v * s
-    x = c * (1 - abs(((h / 60.0) % 2) - 1))
-    m = v - c
-
-    if h < 60:
-        rp, gp, bp = c, x, 0
-    elif h < 120:
-        rp, gp, bp = x, c, 0
-    elif h < 180:
-        rp, gp, bp = 0, c, x
-    elif h < 240:
-        rp, gp, bp = 0, x, c
-    elif h < 300:
-        rp, gp, bp = x, 0, c
+    if i == 0:
+        r, g, b = v, t, p
+    elif i == 1:
+        r, g, b = q, v, p
+    elif i == 2:
+        r, g, b = p, v, t
+    elif i == 3:
+        r, g, b = p, q, v
+    elif i == 4:
+        r, g, b = t, p, v
     else:
-        rp, gp, bp = c, 0, x
+        r, g, b = v, p, q
 
-    r = int(round((rp + m) * 255))
-    g = int(round((gp + m) * 255))
-    b = int(round((bp + m) * 255))
-
-    return (r, g, b)
+    return [int(r * 255), int(g * 255), int(b * 255)]
 
 
-def color_from_wheel(color_deg):
+def color_from_wheel(angle_deg):
     """
-    Map color index (1..360) to an RGB value.
+    Map an angle in degrees [0..360) to a bright, unique-ish RGB color.
 
-    Each bar's color is sampled from a 360-step color wheel.
-    We treat that as hue=color_deg, full saturation, full value.
-
-    Returns an (r,g,b) tuple usable as Expyriment colour.
+    We basically treat angle as hue on the color wheel.
+    Saturation and value are high to make colors pop.
     """
-    return hsv_to_rgb(color_deg, 1.0, 1.0)
+    hue = (angle_deg % 360) / 360.0
+    return hsv_to_rgb(hue, 0.9, 0.9)
 
 
-########################################
-# ========== 3. STIMULUS CREATION ======
-########################################
+# ============================================================
+# --- STIMULUS BUILDERS ---
+# These functions return Expyriment stimuli that we can blit.
+# Nothing is presented here. We just *create* them.
+# ============================================================
 
 def make_oriented_colored_bar(
-    position_px,
-    size_px,
-    orientation_deg,
-    color_id
+    angle_deg,
+    color_angle_deg,
+    center_xy,
+    length_px=60,
+    width_px=10
 ):
     """
-    One memory item (colored, oriented bar).
+    One memory item: a colored bar at a given orientation.
 
-    position_px: (x,y) in pixels, relative to screen center
-    size_px: (length_px, height_px)
-    orientation_deg: orientation of the bar (0-360)
-    color_id: hue on the wheel (1-360)
+    - angle_deg: the physical orientation (what they actually have to remember)
+    - color_angle_deg: used to pick the bar color
+    - center_xy: (x,y) on screen in px
     """
-    length_px, height_px = size_px
-    rgb = color_from_wheel(color_id)
 
+    # Color is based on color_angle_deg, not orientation. That's how we bind.
+    rgb = color_from_wheel(color_angle_deg)
+
+    # Build a rectangle, then rotate it.
     bar = stimuli.Rectangle(
-        size=(int(round(length_px)), int(round(height_px))),
-        colour=rgb,
-        position=position_px
+        size=(length_px, width_px),
+        colour=rgb
     )
-
-    # Expyriment rotation is clockwise
-    bar.rotate(orientation_deg)
-
+    bar.rotate(angle_deg)
+    bar.position = center_xy
     return bar
 
 
-def make_outline_square(
-    position_px,
-    size_px,
-    color=constants.C_BLACK,
-    line_width_px=2
-):
+def make_outline_square(center_xy, size_px=80, line_width=3, colour=constants.C_WHITE):
     """
-    Outline square marking the probed item's original location.
-
-    position_px: (x,y) where the square should be drawn
-    size_px: (w_px, h_px) of the box we want outlined
+    Little square frame used around the probed location during response.
+    Just a visual hint: "this is the item you're reporting".
     """
-    w_px, h_px = size_px
-    w_px = int(round(w_px))
-    h_px = int(round(h_px))
-
-    canv_w = w_px + line_width_px
-    canv_h = h_px + line_width_px
-
-    canv = stimuli.Canvas(
-        size=(canv_w, canv_h),
-        position=position_px,
-        colour=None
+    square = stimuli.Rectangle(
+        size=(size_px, size_px),
+        colour=colour,          # border color
+        line_width=line_width  # >0 means it's an outlined box, not filled
     )
+    square.position = center_xy
+    return square
 
-    half_w = w_px // 2
-    half_h = h_px // 2
-
-    # top
-    stimuli.Line(
-        start_point=(-half_w, -half_h),
-        end_point=(+half_w, -half_h),
-        line_width=line_width_px,
-        colour=color
-    ).plot(canv)
-
-    # bottom
-    stimuli.Line(
-        start_point=(-half_w, +half_h),
-        end_point=(+half_w, +half_h),
-        line_width=line_width_px,
-        colour=color
-    ).plot(canv)
-
-    # left
-    stimuli.Line(
-        start_point=(-half_w, -half_h),
-        end_point=(-half_w, +half_h),
-        line_width=line_width_px,
-        colour=color
-    ).plot(canv)
-
-    # right
-    stimuli.Line(
-        start_point=(+half_w, -half_h),
-        end_point=(+half_w, +half_h),
-        line_width=line_width_px,
-        colour=color
-    ).plot(canv)
-
-    return canv
 
 
 def make_spatial_cue_arrows(target_position_px, color=constants.C_BLACK):
     """
-    Make TWO arrows at fixation, both pointing toward the cued item's position.
-    We infer which diagonal to point to from the sign of (x,y).
+    Retro-cue for spatial condition.
 
-    Returns list of 4 stimuli: [arrow1_rect, arrow1_tri, arrow2_rect, arrow2_tri]
-    All of them are positioned near fixation.
+    We draw TWO arrows at fixation, both pointing toward the cued item.
+    So if the cued item is upper-left, both arrows point upper-left, etc.
+
+    Returns a list of 4 stimuli:
+    [arrow1_rect, arrow1_tri, arrow2_rect, arrow2_tri]
     """
     tx, ty = target_position_px
 
@@ -348,54 +292,28 @@ def make_spatial_cue_arrows(target_position_px, color=constants.C_BLACK):
     return [arrow1_rect, arrow1_tri, arrow2_rect, arrow2_tri]
 
 
-def make_color_cue_square(
-    size_px,
-    fill_color_id
-):
+def make_color_cue_square(rgb_color, size_px=100):
     """
-    Central filled square (feature retro-cue).
-    Drawn at fixation (0,0).
+    Retro-cue for color condition.
 
-    size_px: (w_px, h_px)
-    fill_color_id: hue on wheel (1-360)
+    Just a filled colored square at fixation.
     """
-    w_px, h_px = size_px
-    w_px = int(round(w_px))
-    h_px = int(round(h_px))
-
-    rgb = color_from_wheel(fill_color_id)
-
-    square = stimuli.Rectangle(
-        size=(w_px, h_px),
-        colour=rgb,
-        position=(0, 0)
-    )
-    return square
+    sq = stimuli.Rectangle(size=(size_px, size_px), colour=rgb_color)
+    sq.position = (0, 0)
+    return sq
 
 
-def make_probe_bar(
-    position_px,
-    size_px,
-    orientation_deg,
-    color=constants.C_BLACK
-):
+def make_probe_bar(angle_deg, center_xy, length_px=60, width_px=10, color=constants.C_WHITE):
     """
-    Rotatable response bar shown at fixation during report.
+    The white bar they rotate during response.
 
-    position_px: (x,y)
-    size_px: (length_px, height_px)
-    orientation_deg: bar angle (0-360)
+    angle_deg: current rotation we're showing to the participant
+    center_xy: position of the probed item
     """
-    length_px, height_px = size_px
-
-    bar = stimuli.Rectangle(
-        size=(int(round(length_px)), int(round(height_px))),
-        colour=color,
-        position=position_px
-    )
-    bar.rotate(orientation_deg)
+    bar = stimuli.Rectangle(size=(length_px, width_px), colour=color)
+    bar.rotate(angle_deg)
+    bar.position = center_xy
     return bar
-
 
 def make_feedback_text(
     text,
@@ -412,3 +330,4 @@ def make_feedback_text(
         text_size=font_size,
         position=(0, 0)
     )
+
