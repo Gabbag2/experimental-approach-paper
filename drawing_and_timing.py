@@ -11,7 +11,6 @@ this file controls what gets drawn and for how long
 """
 
 import math
-import time
 from expyriment import stimuli
 from expyriment.misc import constants, geometry
 
@@ -28,7 +27,7 @@ def _blit_to_backbuffer(exp, stim_list):
     """
     for stim in stim_list:
         stim.present(clear=False, update=False)  # draw but don't flip yet
-    # NOTE: We do NOT clear here. Callers are responsible for clearing screen
+    # We do NOT clear here. Callers are responsible for clearing screen
     # before first blit if needed.
 
 
@@ -91,8 +90,6 @@ def present_for_ms(exp, stim_list, duration_ms):
         remaining = target_t - now
         if remaining <= 0:
             break
-        # sleep a little to avoid burning CPU
-        time.sleep(min(remaining / 1000.0, 0.001))
 
 
 # ============================================================
@@ -160,10 +157,10 @@ def make_oriented_colored_bar(
     - center_xy: (x,y) on screen in px
     """
 
-    # Color is based on color_angle_deg, not orientation. That's how we bind.
+    # Color is based on color_angle_deg.
     rgb = color_from_wheel(color_angle_deg)
 
-    # Build a rectangle, then rotate it.
+    # Build a rectangle, then rotate it to desired angle.
     bar = stimuli.Rectangle(
         size=(length_px, width_px),
         colour=rgb
@@ -331,3 +328,22 @@ def make_feedback_text(
         position=(0, 0)
     )
 
+def show_instructions_text(exp):
+    text = (
+        "Keep your eyes on the fixation cross.\n"
+        "You will briefly see 4 colored bars. Memorize the ORIENTATION of each bar.\n\n"
+        "Cue types:\n"
+        "Spatial: arrows point to the location to be tested.\n"
+        "Color: a colored square shows the color of the bar to be tested.\n"
+        "No cue: nothing appears; keep all bars in mind.\n\n"
+        "Response:\n"
+        "Outline marks the target location.\n"
+        "Rotate the center white bar (with mouse movement) to report the orientation of the target bar.\n"
+        "Click to confirm.\n\n"
+        "Feedback shows your error (in degrees °).\n\n"
+        "Be precise. Keep fixating the center.\n"
+        "Press any key to begin."
+    )
+    screen = stimuli.TextScreen("Instructions", text, heading_size=36, text_size=24)
+    screen.present()
+    exp.keyboard.wait()

@@ -27,7 +27,8 @@ from drawing_and_timing import (
     make_color_cue_square,
     make_probe_bar,
     make_feedback_text,
-    color_from_wheel,   # we use this to turn hue (deg) into an RGB square for the color cue
+    color_from_wheel, # we use this to turn hue (deg) into an RGB square for the color cue
+    show_instructions_text
 )
 
 
@@ -35,21 +36,21 @@ from drawing_and_timing import (
 # --- TIMING (in ms) ---
 # ============================================================
 
-FIXATION_DURATION_MS      = 300     # fixation cross
-MEMORY_DURATION_MS        = 500     # memory array on screen
-FIRST_BLANK_DELAY_MS      = 500     # blank before retro-cue
-CUE_DURATION_MS           = 100     # retro-cue on screen
-CUE_PROBE_DELAYS_MS       = [50, 200, 350, 500, 650]  # variable blank after cue
-FEEDBACK_DURATION_MS      = 1000    # how long we show feedback text
+FIXATION_DURATION_MS = 300 # fixation cross
+MEMORY_DURATION_MS = 500 # memory array on screen
+FIRST_BLANK_DELAY_MS = 500 # blank before retro-cue
+CUE_DURATION_MS = 100 # retro-cue on screen
+CUE_PROBE_DELAYS_MS = [50, 200, 350, 500, 650] # variable blank after cue
+FEEDBACK_DURATION_MS = 1000 # how long we show feedback text
 
 
 # ============================================================
 # --- TASK STRUCTURE ---
 # ============================================================
 
-N_ITEMS_PER_ARRAY         = 4
-REPEATS_PER_CONDITION     = 28      # per (cue_type x delay)
-CUE_TYPES                 = ["spatial", "color", "no_cue"]
+N_ITEMS_PER_ARRAY = 4
+REPEATS_PER_CONDITION = 28 # per (cue_type x delay)
+CUE_TYPES = ["spatial", "color", "no_cue"]
 
 
 # ============================================================
@@ -59,21 +60,21 @@ CUE_TYPES                 = ["spatial", "color", "no_cue"]
 # ============================================================
 
 ITEM_POSITIONS_PX = [
-    (-200, +200),   # top-left
-    (+200, +200),   # top-right
-    (-200, -200),   # bottom-left
-    (+200, -200),   # bottom-right
+    (-200, +200), # top-left
+    (+200, +200), # top-right
+    (-200, -200), # bottom-left
+    (+200, -200), # bottom-right
 ]
 
 # size of the memory/probe bars
-BAR_LENGTH_PX            = 110      # along the bar's main axis
-BAR_WIDTH_PX             = 25       # thickness of the bar
+BAR_LENGTH_PX = 110 # along the bar's main axis
+BAR_WIDTH_PX = 25 # thickness of the bar
 
 # outline square shown during the response phase around the cued item's location
-PROBE_MARKER_SIZE_PX     = 120      # side length of the outline square
+PROBE_MARKER_SIZE_PX = 120 # side length of the outline square
 
 # mouse sensitivity for rotating the probe bar during response
-ROTATION_SENSITIVITY     = 0.4      # deg per horizontal pixel moved
+ROTATION_SENSITIVITY = 0.4 # deg per horizontal pixel moved
 
 
 # ============================================================
@@ -83,11 +84,11 @@ ROTATION_SENSITIVITY     = 0.4      # deg per horizontal pixel moved
 # 2. a distinct color (not too similar on the hue wheel)
 # ============================================================
 
-ORI_RANGE_DEG            = (1, 180)   # allowed orientations (bars are symetrical so 0-180 is enough)
-ORI_MIN_SEP_DEG          = 30         # bars differ by at least 30° orientation
+ORI_RANGE_DEG = (1, 180) # allowed orientations (bars are symetrical so 0-180 is enough)
+ORI_MIN_SEP_DEG = 30 # bars differ by at least 30° orientation
 
-COL_RANGE_DEG            = (1, 360)   # allowed hues on color wheel
-COL_MIN_SEP_DEG          = 60         # hues differ by at least 60° on the wheel
+COL_RANGE_DEG = (1, 360) # allowed hues on color wheel
+COL_MIN_SEP_DEG = 60 # hues differ by at least 60° on the wheel
 
 
 # ============================================================
@@ -108,12 +109,12 @@ def build_trial_list():
     trials = []
     reps_per_loc = REPEATS_PER_CONDITION // 4
 
-    for cue_type in CUE_TYPES:                  # 3
-        for dly in CUE_PROBE_DELAYS_MS:         # 5
+    for cue_type in CUE_TYPES: # 3
+        for dly in CUE_PROBE_DELAYS_MS: # 5
             # build the 28 trials for this (cue_type, dly)
             block_trials = []
-            for loc_idx in range(N_ITEMS_PER_ARRAY):  # 0..3
-                for _ in range(reps_per_loc):         # 7
+            for loc_idx in range(N_ITEMS_PER_ARRAY): # 0..3
+                for _ in range(reps_per_loc): # 7
                     block_trials.append({
                         "cue_type": cue_type,
                         "delay": dly,
@@ -225,7 +226,7 @@ def run_single_trial(exp, cue_type, cue_probe_delay_ms, target_loc_idx):
         }
     """
 
-    exp.mouse.show_cursor()  # participant uses mouse to rotate the probe bar
+    exp.mouse.show_cursor() # participant uses mouse to rotate the probe bar
 
     # --------------------------------------------------------
     # 1. Fixation cross
@@ -292,9 +293,6 @@ def run_single_trial(exp, cue_type, cue_probe_delay_ms, target_loc_idx):
     elif cue_type == "no_cue":
         present_for_ms(exp, [], CUE_DURATION_MS)
 
-    else:
-        raise ValueError(f"Unknown cue_type: {cue_type}")
-
     # --------------------------------------------------------
     # 5. Variable cue/probe delay (blank screen)
     # --------------------------------------------------------
@@ -312,14 +310,14 @@ def run_single_trial(exp, cue_type, cue_probe_delay_ms, target_loc_idx):
     #
     # We keep redrawing until they confirm.
     # --------------------------------------------------------
-    current_angle = 90.0  # starting orientation of the probe bar (in deg)
+    current_angle = 90.0 # starting orientation of the probe bar (in deg)
     reported_orientation = None
 
     response_done = False
     last_mouse_x, _ = exp.mouse.position
 
     while not response_done:
-        # outline marks WHICH location is being tested
+        # outline marks which location is being tested
         outline_stim = make_outline_square(
             center_xy=target_pos_px,
             size_px=PROBE_MARKER_SIZE_PX,
@@ -399,15 +397,15 @@ def main():
     BG_GRAY = (128, 128, 128)
 
     exp = design.Experiment(
-        name="retro_cue_task_fixed_layout",
+        name="retro_cue_task",
         background_colour=BG_GRAY,
         foreground_colour=constants.C_BLACK
     )
 
     control.initialize(exp)
 
-    # If you want dev mode (windowed, fast, etc.), uncomment:
-    # control.set_develop_mode()
+    # If you want dev mode, uncomment:
+    control.set_develop_mode()
 
     # define what columns we will save in expyriment's data file
     exp.data_variable_names = [
@@ -423,11 +421,13 @@ def main():
     all_trials = build_trial_list()
 
     # optional: practice trials before we start recording data
-    # for _ in range(5): # replace with number of practice trials
+    #for _ in range(5): # replace with number of practice trials
     #     t = random.choice(all_trials)
     #     run_single_trial(exp, t["cue_type"], t["delay"])
 
     control.start(subject_id=1)
+
+    show_instructions_text(exp)
 
     for t in all_trials:
         result = run_single_trial(
